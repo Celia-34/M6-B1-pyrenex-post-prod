@@ -23,6 +23,24 @@ Un **data drift** se traduit par un déplacement des features avec un AUC stable
 
 Lecture métier : médiane `int_rate` 12.0 → 15.1 (p90 : 18.6 → 21.9), médiane `revol_util` 50.5 → 58.1 (p90 : 76.7 → 87.3), et déplacement de la distribution `grade` vers des profils plus risqués. **3 features sur 14 montrent un déplacement net** → signal cohérent avec un changement de population de clients (data drift), pas avec un changement de règle métier.
 
+### Focus `annual_inc` : PSI entre deux moitiés de la référence
+
+Pour vérifier la variabilité naturelle du PSI, le jeu `reference_set` est mélangé puis séparé en deux moitiés 200 fois. À chaque itération, on compare directement les deux moitiés :
+
+$$
+PSI = PSI(\text{moitié 1}, \text{moitié 2})
+$$
+
+Résultats obtenus avec `random_state = 42` :
+
+- PSI moyen entre les deux moitiés : `0,0241` ;
+- écart-type des PSI : `0,0107` ;
+- intervalle empirique à 95 % : `[0,0082 ; 0,0521]` ;
+- repères `moyenne ± 2σ` : `[0,0027 ; 0,0455]` ;
+- aucun des 200 PSI ne dépasse `0,10` ou `0,25`.
+
+La distribution reste nettement sous le seuil PSI de `0,10`. Le PSI observé entre deux moitiés aléatoires de la même référence mesure ici la variabilité d'échantillonnage, et non une dérive entre référence et production. Pour `annual_inc`, cette variabilité interne est faible : la distribution de la variable est donc homogène au sein de `reference_set`. Cela confirme que le PSI `0,0666` mesuré entre la référence complète et la production reste dans la zone stable malgré la p-value KS faible.
+
 ## Axe 2 — AUC (pouvoir discriminant)
 
 | Période | AUC | n |
