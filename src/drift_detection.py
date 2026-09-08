@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 from scipy.stats import chi2_contingency, ks_2samp
 
-PSI_STABLE = 0.10
-PSI_DRIFT = 0.25
+PSI_STABLE = 0.05
+PSI_SUSPECT = 0.15
+PSI_DRIFT = 0.30
 
 
 def population_stability_index(reference: pd.Series, current: pd.Series, n_bins: int = 10) -> float:
@@ -20,29 +21,46 @@ def population_stability_index(reference: pd.Series, current: pd.Series, n_bins:
     PSI = Σ (p_cur - p_ref) * ln(p_cur / p_ref), bornes des bins = quantiles de
     la référence. ⚠️ pensez au lissage anti-zéro (sinon ln(0) / division par 0).
     """
-    # TODO 1 — calculer les bords de bins (quantiles de `reference`),
-    #   les comptages par bin pour ref et cur, les proportions (+ epsilon),
-    #   puis la somme PSI.
-    raise NotImplementedError
+    epsilon = 1e-4
+    quantiles = np.linspace(0, 1, n_bins + 1)
+    bin_edges = np.unique(reference.quantile(quantiles).to_numpy())
+    bin_edges[0] = -np.inf
+    bin_edges[-1] = np.inf
+
+    ref_counts, _ = np.histogram(reference, bins=bin_edges)
+    cur_counts, _ = np.histogram(current, bins=bin_edges)
+
+    ref_perc = ref_counts / ref_counts.sum() + epsilon
+    cur_perc = cur_counts / cur_counts.sum() + epsilon
+
+    return float(np.sum((cur_perc - ref_perc) * np.log(cur_perc / ref_perc)))
 
 
 def psi_verdict(psi: float) -> str:
-    """Traduit un PSI en verdict (stable / suspect / dérive)."""
-    # TODO 2 — utiliser PSI_STABLE et PSI_DRIFT.
-    raise NotImplementedError
+    """Traduit un PSI en verdict (stable / suspect / dérive / dérive sévère)."""
+    if psi < PSI_STABLE:
+        return "stable"
+    if psi < PSI_SUSPECT:
+        return "suspect"
+    if psi < PSI_DRIFT:
+        return "dérive"
+    return "dérive sévère"
 
 
 def ks_pvalue(reference: pd.Series, current: pd.Series) -> float:
     """p-value du test de Kolmogorov-Smirnov (2 échantillons)."""
-    # TODO 3 — ks_2samp(...).pvalue
-    raise NotImplementedError
+    return float(ks_2samp(reference, current).pvalue)
 
 
 def chi2_pvalue(reference: pd.Series, current: pd.Series) -> float:
     """p-value du Chi² sur les fréquences de modalités (aligner les modalités)."""
-    # TODO 4 — construire la table de contingence (réindexer sur l'union des
-    #   modalités, lissage +1) puis chi2_contingency(table)[1].
-    raise NotImplementedError
+    categories = sorted(set(reference.unique()) | set(current.unique()))
+    # table de contingence réindexée sur l'union des modalités, avec lissage +1
+    ref_counts = reference.value_counts().reindex(categories, fill_value=0) + 1
+    cur_counts = current.value_counts().reindex(categories, fill_value=0) + 1
+    table = np.array([ref_counts.to_numpy(), cur_counts.to_numpy()])
+
+    return float(chi2_contingency(table)[1])
 
 
 def drift_report(
@@ -50,6 +68,32 @@ def drift_report(
     numeric_cols: list[str], categorical_cols: list[str],
 ) -> pd.DataFrame:
     """Tableau de synthèse : feature / type / psi / ks_pvalue / chi2_pvalue / verdict."""
-    # TODO 5 — boucler sur numeric_cols (PSI + KS) et categorical_cols (Chi²),
-    #   construire un DataFrame trié par sévérité.
-    raise NotImplementedError
+    rows = []
+    for col in numeric_cols:
+        psi = population_stability_index(reference[col], current[col])
+        rows.append({
+            "feature": col,
+            "type": "numeric",
+            "psi": psi,
+            "ks_pvalue": ks_pvalue(reference[col], current[col]),
+            "chi2_pvalue": np.nan,
+            "verdict": psi_verdict(psi),
+        })
+
+    for col in categorical_cols:
+        p_value = chi2_pvalue(reference[col], current[col])
+        rows.append({
+            "feature": col,
+            "type": "categorical",
+            "psi": np.nan,
+            "ks_pvalue": np.nan,
+            "chi2_pvalue": p_value,
+            "verdict": "dérive" if p_value < 0.05 else "stable",
+        })
+
+    severity_rank = {"dérive sévère": 0, "dérive": 1, "suspect": 2, "stable": 3}
+    report = pd.DataFrame(rows)
+    report["_severity"] = report["verdict"].map(severity_rank)
+    report = report.sort_values("_severity").drop(columns="_severity").reset_index(drop=True)
+
+    return report
