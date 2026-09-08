@@ -45,16 +45,27 @@ def psi_verdict(psi: float) -> str:
 
 
 def ks_pvalue(reference: pd.Series, current: pd.Series) -> float:
-    """p-value du test de Kolmogorov-Smirnov (2 échantillons)."""
-    return float(ks_2samp(reference, current).pvalue)
+    """p-value du test de Kolmogorov-Smirnov (2 échantillons).
+
+    On retire les valeurs manquantes avant le test, sinon scipy renvoie NaN pour
+    les séries contenant des NA.
+    """
+    ref_clean = pd.to_numeric(reference, errors='coerce').dropna()
+    cur_clean = pd.to_numeric(current, errors='coerce').dropna()
+    if ref_clean.empty or cur_clean.empty:
+        return float('nan')
+    return float(ks_2samp(ref_clean, cur_clean).pvalue)
 
 
 def chi2_pvalue(reference: pd.Series, current: pd.Series) -> float:
     """p-value du Chi² sur les fréquences de modalités (aligner les modalités)."""
-    categories = sorted(set(reference.unique()) | set(current.unique()))
+    ref_categories = set(reference.dropna().astype(str).unique())
+    cur_categories = set(current.dropna().astype(str).unique())
+    categories = sorted(ref_categories | cur_categories, key=lambda x: str(x))
+
     # table de contingence réindexée sur l'union des modalités, avec lissage +1
-    ref_counts = reference.value_counts().reindex(categories, fill_value=0) + 1
-    cur_counts = current.value_counts().reindex(categories, fill_value=0) + 1
+    ref_counts = reference.astype(str).fillna('NA').value_counts().reindex(categories, fill_value=0) + 1
+    cur_counts = current.astype(str).fillna('NA').value_counts().reindex(categories, fill_value=0) + 1
     table = np.array([ref_counts.to_numpy(), cur_counts.to_numpy()])
 
     return float(chi2_contingency(table)[1])
