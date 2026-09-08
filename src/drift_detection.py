@@ -10,9 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import chi2_contingency, ks_2samp
 
-PSI_STABLE = 0.05
-PSI_SUSPECT = 0.15
-PSI_DRIFT = 0.30
+PSI_STABLE = 0.10
+PSI_DRIFT = 0.25
 
 
 def population_stability_index(reference: pd.Series, current: pd.Series, n_bins: int = 10) -> float:
@@ -37,14 +36,12 @@ def population_stability_index(reference: pd.Series, current: pd.Series, n_bins:
 
 
 def psi_verdict(psi: float) -> str:
-    """Traduit un PSI en verdict (stable / suspect / dérive / dérive sévère)."""
+    """Traduit un PSI en verdict (stable / à investiguer / dérive)."""
     if psi < PSI_STABLE:
         return "stable"
-    if psi < PSI_SUSPECT:
-        return "suspect"
-    if psi < PSI_DRIFT:
-        return "dérive"
-    return "dérive sévère"
+    if psi <= PSI_DRIFT:
+        return "à investiguer"
+    return "dérive"
 
 
 def ks_pvalue(reference: pd.Series, current: pd.Series) -> float:
@@ -91,7 +88,7 @@ def drift_report(
             "verdict": "dérive" if p_value < 0.05 else "stable",
         })
 
-    severity_rank = {"dérive sévère": 0, "dérive": 1, "suspect": 2, "stable": 3}
+    severity_rank = {"dérive": 0, "à investiguer": 1, "stable": 2}
     report = pd.DataFrame(rows)
     report["_severity"] = report["verdict"].map(severity_rank)
     report = report.sort_values("_severity").drop(columns="_severity").reset_index(drop=True)
