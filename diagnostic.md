@@ -41,6 +41,8 @@ Lecture métier : médiane `int_rate` 12.0 → 15.1 (p90 : 18.6 → 21.9), médi
 
 Le taux réel de défaut reste stable (~20%) alors que la probabilité moyenne prédite augmente de 0.4427 à 0.5158 : le modèle devient **sur-confiant**, et l'écart se creuse (**ECE +0.0749**, soit +31% relatif). Le reliability diagram est nettement sous la diagonale sur les deux périodes, avec un décalage plus marqué en fin de fenêtre. Cette dégradation de calibration **sans dégradation du tri (AUC stable)** est la signature typique d'un data drift : les scores bruts se décalent parce que la distribution d'entrée a changé, mais la capacité du modèle à hiérarchiser le risque reste intacte.
 
+À noter : l'ECE est déjà élevé dès les semaines 1-4 (0.2403), avant même toute dérive constatée. Deux explications possibles à ce niveau de base : un biais de mesure sur le calcul de l'ECE (nombre de bins, taille d'échantillon), ou l'effet du rééquilibrage des classes (`class_weight`) utilisé à l'entraînement, qui réaugmente artificiellement le poids de la classe minoritaire et décale mécaniquement les probabilités prédites par rapport au taux réel. Ce niveau de base ne remet toutefois pas en cause le diagnostic : ce qui compte ici est la tendance, à savoir que l'ECE **continue d'augmenter** dans le temps (+0.0749), et cette augmentation reste le signal exploitable pour le suivi de calibration.
+
 ## Axe 4 — Temporalité
 
 En croisant les fenêtres semaines 1-4 vs semaines 9-12 :
@@ -59,10 +61,11 @@ La dégradation de calibration suit la même trajectoire temporelle que le dépl
 | Calibration | ECE 0.2403 → 0.3152 (+31%), sur-confiance croissante | Data drift (conséquence du déplacement des features) |
 | Temporalité | Dégradation progressive et corrélée entre features et calibration, pas de rupture brutale de l'AUC | Data drift continu |
 
-**Verdict : data drift plausible, concept drift non avéré.**
+**Verdict : data drift avéré, concept drift non avéré.**
 
 Les quatre axes convergent : la population de dossiers évolue (`int_rate`, `revol_util`, `grade`), ce qui déforme la confiance du score (ECE en hausse), mais la relation entre les variables d'entrée et le risque réel reste intacte (AUC stable). Un concept drift aurait nécessité une chute de l'AUC et/ou un changement de comportement du modèle indépendant du déplacement des features — signal absent ici.
 
+- **Limite du diagnostic statistique** : les métriques ne peuvent pas exclure totalement un concept drift à elles seules. Pour écarter complètement l'hypothèse, il faut aussi interroger les équipes métier : y a-t-il eu un changement de règles d'octroi ou de politique de risque, une modification de la définition ou du calcul des features (ex. `int_rate`, `revol_util`), l'apparition de nouveaux labels ou une évolution de la définition du défaut (`loan_status`) sur la période observée ? Ce sont ces changements de logique métier, non visibles dans les données seules, qui caractériseraient un véritable concept drift.
 - **Action recommandée** : réentraîner le modèle sur des données récentes pour recaler les probabilités prédites (recalibration), sans remettre en cause l'architecture ou les features actuelles.
 - **Urgence** : moyenne — l'AUC ne s'est pas dégradé, mais l'ECE en hausse continue dégrade la fiabilité des scores pour les décisions métier (ex. seuils d'acceptation).
 - **Point de vigilance qualité des données** : `revol_util` cumule un signal de dérive (PSI = 0.1864) et un taux de valeurs manquantes non négligeable (ref 1.33% / prod 1.2%) ; un contrôle qualité est nécessaire avant réentraînement pour écarter un biais de complétude qui amplifierait artificiellement le signal.
