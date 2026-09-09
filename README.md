@@ -1,8 +1,8 @@
-# M6-B1 — Analyser la performance et détecter la dérive (Pyrenex, 3 mois post-prod)
+# M6-B1 — Analyse de dérive et performance du modèle Pyrenex
 
-> **Repo template.** Un·e du binôme clique **« Use this template »** →
-> `M6-B1-pyrenex-drift-<binome>`, ajoute l'autre en collaborateur. Vous
-> diagnostiquez la dérive du modèle déployé en M5 et rendez une note à Sophie Léger.
+Ce projet analyse trois mois de production du modèle de risque déployé en M5.
+L'objectif est de distinguer un **data drift** d'un **concept drift**, d'évaluer
+la calibration des probabilités et de proposer une action proportionnée.
 
 ## 🚀 Démarrage
 
@@ -10,7 +10,7 @@
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q tests            # vert dès le clone (certains tests se débloquent avec vos TODO)
-jupyter notebook notebooks/M6-B1_template.ipynb
+jupyter notebook notebooks/M6-B1_template_celia_theo.ipynb
 ```
 
 > Variante `uv` : `uv venv .venv && source .venv/bin/activate` puis
@@ -19,30 +19,123 @@ jupyter notebook notebooks/M6-B1_template.ipynb
 > utilisez `uv pip install …` (pas `pip install`).
 
 Les **données sont fournies** dans `data/` : `reference_set.csv` (baseline),
-`prod_3months.csv` (3 mois de prod), `predictions_log.csv` (logs du modèle).
+`prod_3months.csv` (3 mois de production), `predictions_log.csv` (logs du modèle).
 
-## 🧭 Ce que vous construisez
+## 🔎 Travaux réalisés
 
-| # | À faire | Fichier | Mini-cours |
-|---|---|---|---|
-| 1 | Détection PSI / KS / Chi² | `src/drift_detection.py` | `01` |
-| 2 | Calibration (reliability diagram ; ECE en bonus ⭐) | `src/calibration.py` | `03` |
-| 3 | Analyse complète | `notebooks/M6-B1_template.ipynb` | `01`,`02`,`03` |
-| 4 | Diagnostic data vs concept drift | `diagnostic.md` | `02` |
-| 5 | Note de recommandation | `note_recommandation_TEMPLATE.md` | `04` |
-| 6 | Extension dashboard Grafana (3 panels **live**) | `grafana/provisioning/dashboards/pyrenex_drift_TEMPLATE.json` | `05` |
-| 6⭐ | *(option)* publier le PSI a Prometheus sans nouveau service | `metrics/psi.prom` + compose + `prometheus.yml` | `05` |
+| Analyse | Résultat | Fichier |
+|---|---|---|
+| Exploration des distributions | Comparaison référence / production, histogrammes à bornes communes et taux de valeurs manquantes | [notebooks/M6-B1_template_celia_theo.ipynb](notebooks/M6-B1_template_celia_theo.ipynb) |
+| Détection statistique | PSI, KS et Chi² sur les variables numériques et catégorielles | [src/drift_detection.py](src/drift_detection.py) |
+| Sensibilité du PSI | Pour `annual_inc`, PSI entre deux moitiés aléatoires de `reference_set`, sur 200 découpages | [notebooks/M6-B1_template_celia_theo.ipynb](notebooks/M6-B1_template_celia_theo.ipynb) |
+| Calibration | Reliability diagram et ECE sur les semaines 1-4 et 9-12 | [src/calibration.py](src/calibration.py) |
+| Performance temporelle | AUC calculée sur les mêmes fenêtres de production | [notebooks/M6-B1_template_celia_theo.ipynb](notebooks/M6-B1_template_celia_theo.ipynb) |
+| Recommandation | Diagnostic et recommandation via `recommendations.py` | [notebooks/M6-B1_template_celia_theo.ipynb](notebooks/M6-B1_template_celia_theo.ipynb) |
+| Dashboard live | Extension du dashboard Grafana de la stack M5 | [grafana/provisioning/dashboards/pyrenex_prod.json](grafana/provisioning/dashboards/pyrenex_prod.json) |
 
-## ✅ Réussite (rappel)
+## 📊 Résultats
 
-- PSI/KS/Chi² sur **toutes** les features pertinentes.
-- Diagnostic **chiffré et tranché** (data drift vs concept drift — regarder l'AUC !).
-- Note **lisible Sophie Léger** (pas ML), chiffrée, décision tranchée.
-- Dashboard étendu **provisionné** sur la stack M5 — dans
-  `grafana/provisioning/dashboards/` (**le seul dossier monté** par votre compose M5),
-  et **sans aucun panel « No data »** : PSI, KS, Chi² et F1-12-semaines sont des
-  mesures batch, leur place est le **notebook**. Votre README dit pourquoi en 2 lignes.
-- Notebook top→bottom, commits `Co-authored-by:`, **journal de bord**.
+### Dérive des variables
+
+- `int_rate` : PSI `0,4429`, KS p-value environ `4,6e-65` ; dérive forte.
+- `revol_util` : PSI `0,1864`, KS p-value environ `3,8e-20` ; signal à investiguer.
+- `grade` : Chi² p-value environ `3,65e-07` ; déplacement vers des grades plus risqués.
+- `annual_inc` : PSI référence / production `0,0666` ; amplitude sous le repère
+  conventionnel de `0,10`, mais supérieure à la variabilité interne observée
+  dans la référence.
+
+Pour vérifier que ce résultat sur `annual_inc` n'est pas dû à une référence
+hétérogène, 200 découpages aléatoires de `reference_set` en deux moitiés ont
+été réalisés. Le PSI entre les deux moitiés est en moyenne de `0,0241`, avec
+un intervalle empirique à 95 % de `[0,0082 ; 0,0521]`. Aucun des 200 PSI ne
+dépasse `0,10`. Le PSI référence / production de `0,0666` est donc supérieur
+à la borne haute de cette variabilité interne (`0,0521`) : il constitue un
+signal de dérive pour `annual_inc`, même s'il reste sous le seuil conventionnel
+de `0,10`.
+
+Le seuil `0,10` est un repère pratique et arbitraire, pas une preuve d'absence
+de dérive. Dans ce cas, la comparaison avec la distribution de référence et
+avec la variabilité obtenue par les 200 découpages montre une dérive de faible
+amplitude mais réelle, qui doit être surveillée.
+
+### Performance et calibration
+
+- AUC semaines 1-4 : `0,7419` ; AUC semaines 9-12 : `0,7459`.
+- ECE semaines 1-4 : `0,2403` ; ECE semaines 9-12 : `0,3152`.
+- La capacité de classement reste stable, mais les probabilités sont de plus
+  en plus sur-confiantes : la probabilité moyenne prédite passe d'environ
+  `0,4427` à `0,5158`, alors que le taux réel de défaut reste proche de `0,20`.
+
+Le diagnostic retenu est donc un **data drift avéré**, avec un **concept drift
+non avéré**. La recommandation est de contrôler la qualité des données,
+surveiller la calibration et recalibrer sur des données récentes avant
+d'envisager un réentraînement complet.
+
+## 📈 Dashboard Grafana
+
+Le dashboard est provisionné dans le dossier attendu par la stack M5 et ajoute
+quatre vues opérationnelles au suivi de production :
+
+1. médiane et p90 des probabilités prédites, à partir des buckets de
+   `pyrenex_prediction_proba` avec `rate()` et `histogram_quantile()` ;
+2. répartition des classes prédites via `pyrenex_predictions_total` ;
+3. volume des requêtes et taux d'erreur HTTP via `http_requests_total` ;
+4. PSI live des probabilités prédites via la gauge `pyrenex_prediction_psi`.
+
+![Dashboard Grafana Pyrenex](grafana.png)
+
+Le trafic de démonstration a été généré avec
+[src/generate_traffic.py](src/generate_traffic.py), utilisé sur la stack M5 :
+
+```bash
+python src/generate_traffic.py --requests 500 --concurrency 20 --seed 42
+```
+
+Le script envoie des requêtes valides à `http://localhost:8001/score` et varie
+les caractéristiques des dossiers. Les métriques sont ensuite exposées par
+les services M5, scrapées par Prometheus et visualisées dans Grafana.
+
+### Comment le PSI est mesuré dans Grafana
+
+La stack M5 expose bien un PSI live dans Prometheus sous la métrique
+`pyrenex_prediction_psi`, affichée dans le panel « Comportement | PSI des
+probabilités prédites ». Le calcul est effectué par le service `model`, puis
+Grafana interroge directement la gauge avec la requête PromQL
+`pyrenex_prediction_psi`.
+
+Ce PSI live ne mesure pas les mêmes distributions que le PSI du notebook. Dans
+Grafana, il compare progressivement la distribution des **probabilités de
+défaut prédites en production** à une distribution de référence gelée du
+modèle, chargée depuis la baseline M5. Les probabilités sont réparties dans les
+bins `[0, 0.1, ..., 1.0]`. À chaque prédiction, le compteur de la tranche est
+mis à jour, puis la proportion observée est comparée à la proportion attendue
+de la baseline :
+
+$$
+PSI = \sum_i (p_{production,i} - p_{reference,i})
+\ln\left(\frac{p_{production,i}}{p_{reference,i}}\right)
+$$
+
+Le calcul utilise un petit epsilon pour éviter les divisions ou logarithmes de
+zéro. La gauge est initialisée à zéro, puis évolue à mesure que le trafic arrive.
+Le dashboard applique les repères visuels suivants : vert sous `0,10`, orange
+entre `0,10` et `0,25`, rouge au-dessus de `0,25`.
+
+Il faut toutefois conserver un doute raisonnable sur une valeur isolée : le PSI
+live dépend de la baseline choisie, des bins `[0, 0.1, ..., 1.0]`, du nombre de
+prédictions reçues et de la période depuis le démarrage du service. Ce n'est
+pas exactement le PSI des features calculé dans le notebook, comme `annual_inc`
+(`0,0666` entre référence et production). Le bootstrap de `annual_inc` entre
+deux moitiés de la référence donne une variabilité interne de `0,0241` en
+moyenne et une borne haute de `0,0521` ; cela permet de repérer un écart au-delà
+de la variabilité d'échantillonnage, sans transformer le seuil `0,10` en norme
+universelle.
+
+Le PSI des features, le KS, le Chi² et l'AUC sur 12 semaines restent des
+mesures batch documentées dans le notebook. Le PSI des probabilités, lui, est
+suivi en continu dans Grafana grâce à `pyrenex_prediction_psi`, en complément
+du trafic, des erreurs, de la distribution des probabilités et des classes
+prédites.
 
 ## 📚 Ressources
 
