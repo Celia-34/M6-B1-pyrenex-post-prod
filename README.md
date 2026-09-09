@@ -121,15 +121,30 @@ zéro. La gauge est initialisée à zéro, puis évolue à mesure que le trafic 
 Le dashboard applique les repères visuels suivants : vert sous `0,10`, orange
 entre `0,10` et `0,25`, rouge au-dessus de `0,25`.
 
-Il faut toutefois conserver un doute raisonnable sur une valeur isolée : le PSI
-live dépend de la baseline choisie, des bins `[0, 0.1, ..., 1.0]`, du nombre de
-prédictions reçues et de la période depuis le démarrage du service. Ce n'est
-pas exactement le PSI des features calculé dans le notebook, comme `annual_inc`
-(`0,0666` entre référence et production). Le bootstrap de `annual_inc` entre
-deux moitiés de la référence donne une variabilité interne de `0,0241` en
-moyenne et une borne haute de `0,0521` ; cela permet de repérer un écart au-delà
-de la variabilité d'échantillonnage, sans transformer le seuil `0,10` en norme
-universelle.
+### Réserve sur la valeur PSI affichée
+
+La valeur visible dans la capture Grafana est d'environ `0,523`, donc nettement
+au-dessus du seuil rouge de `0,25`. Ce niveau paraît étonnant et ne doit pas
+être interprété seul comme la preuve d'une dérive du modèle. Dans la stack M5,
+le PSI est calculé de manière **cumulative depuis le démarrage du service** :
+les compteurs des bins sont alimentés par les prédictions reçues et la gauge
+est recalculée après chaque nouvelle prédiction. Ce n'est donc pas un PSI sur
+une fenêtre glissante fixe.
+
+La valeur dépend fortement de la baseline gelée du modèle, des bins
+`[0, 0.1, ..., 1.0]`, du nombre de prédictions reçues, du moment où la capture
+est prise et de la représentativité du trafic envoyé. Le script
+`generate_traffic.py` produit un trafic de démonstration aléatoire ; sa
+distribution peut être différente de la population de production utilisée pour
+construire la baseline. Un PSI élevé peut donc refléter un décalage entre la
+baseline et ce trafic de test, ou un effet du faible volume au début du service,
+plutôt qu'une dérive métier confirmée.
+
+La bonne lecture consiste à vérifier la tendance après un volume suffisant de
+prédictions, à comparer la distribution des probabilités aux bins de la
+baseline, et à compléter avec les métriques du notebook : PSI des features,
+KS, Chi², AUC et calibration. Les seuils `0,10` et `0,25` restent des repères
+pratiques ; ils ne remplacent pas cette vérification.
 
 Le PSI des features, le KS, le Chi² et l'AUC sur 12 semaines restent des
 mesures batch documentées dans le notebook. Le PSI des probabilités, lui, est
